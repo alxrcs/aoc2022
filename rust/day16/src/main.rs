@@ -18,6 +18,80 @@ fn main() {
 
     let pos = "AA".to_string();
     let time_bound = 30;
+
+    let distances = reduce_graph(&flow_map, &tunnels);
+
+    let relevant_valves: HashSet<&String> = flow_map
+        .iter()
+        .filter(|(_, f)| **f > 0)
+        .map(|(v, _)| v)
+        .collect();
+
+    println!("Distances calculated.");
+
+    let open_pumps = HashSet::new();
+
+    let valve_subsets = subsets_of(&relevant_valves);
+
+    let mut max_flow = 0;
+
+    for subset in valve_subsets {
+        let elephant_subset = relevant_valves.difference(&subset).cloned().collect();
+
+        let my_max_flow = explore_with_elephant(
+            pos.clone(),
+            0,
+            0,
+            4,
+            time_bound,
+            &open_pumps,
+            &subset,
+            &flow_map,
+            &distances,
+        );
+
+        let elephant_max_flow = explore_with_elephant(
+            pos.clone(),
+            0,
+            0,
+            4,
+            time_bound,
+            &open_pumps,
+            &elephant_subset,
+            &flow_map,
+            &distances,
+        );
+
+        let total_flow = my_max_flow.0 + elephant_max_flow.0;
+        if total_flow > max_flow {
+            max_flow = total_flow;
+            println!("New max flow: {}", total_flow);
+        }
+    }
+}
+
+fn subsets_of<'a>(collection: &'a HashSet<&'a String>) -> Vec<HashSet<&'a String>> {
+    let mut subsets = Vec::new();
+
+    for i in 0..(1 << collection.len()) {
+        let mut subset = HashSet::new();
+        for (j, item) in collection.iter().enumerate() {
+            if i & (1 << j) != 0 {
+                subset.insert(*item);
+            }
+        }
+        subsets.push(subset);
+    }
+
+    subsets
+}
+
+#[test]
+fn part_1() {
+    let (flow_map, tunnels) = parse("input.txt");
+
+    let pos = "AA".to_string();
+    let time_bound = 30;
     let cur_time = 0;
 
     let distances = reduce_graph(&flow_map, &tunnels);
@@ -138,6 +212,71 @@ fn explore(
     }
 
     best_flow
+}
+
+fn explore_with_elephant<'a>(
+    pos: String,
+    cur_flow_per_minute: i32,
+    total_flow: i32,
+    minute: i32,
+    time_bound: i32,
+    open_pumps: &HashSet<&'a Pump>,
+    relevant_valves: &HashSet<&'a Pump>,
+    flow_map: &FlowMap,
+    distances: &DistanceMap,
+) -> (i32, HashSet<&'a Pump>) {
+    // There is no time left, return the current flow
+    if minute >= time_bound {
+        assert!(minute == time_bound);
+        return (total_flow, open_pumps.clone());
+    }
+
+    // There are no more relevant valves, return the current flow times the time left
+    let unopened_valves: HashSet<&String> = relevant_valves - open_pumps;
+    if unopened_valves.is_empty() {
+        return (
+            total_flow + cur_flow_per_minute * (time_bound - minute),
+            unopened_valves.clone(),
+        );
+    }
+
+    let mut best_val: (i32, HashSet<&'a String>) = (0, HashSet::new());
+
+    // Try moving to valve and opening it
+    // Consume the time it takes to get there
+    // Explore recursively from there
+    for valve in &unopened_valves {
+        let cost = distances[&(pos.clone(), valve.to_string())];
+
+        let mut new_open_pumps = open_pumps.clone();
+        new_open_pumps.insert(valve);
+
+        let val;
+        if minute + cost <= time_bound {
+            val = explore_with_elephant(
+                valve.to_string(),
+                cur_flow_per_minute + flow_map[*valve],
+                total_flow + cur_flow_per_minute * cost,
+                minute + cost,
+                time_bound,
+                &new_open_pumps,
+                relevant_valves,
+                flow_map,
+                distances,
+            );
+        } else {
+            val = (
+                total_flow + cur_flow_per_minute * (time_bound - minute),
+                unopened_valves.clone(),
+            );
+        }
+
+        if val.0 > best_val.0 {
+            best_val = val;
+        }
+    }
+
+    best_val
 }
 
 fn reduce_graph(flows: &FlowMap, tunnels: &HashMap<Pump, Vec<Pump>>) -> DistanceMap {
